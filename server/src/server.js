@@ -1,110 +1,70 @@
-// @flow
-
 import express from 'express';
 import path from 'path';
 import reload from 'reload';
-import fs from 'fs';
-import mysql from 'mysql';
-
-let pool = mysql.createPool({
-    host: 'mysql.stud.ntnu.no',
-    user: 'michaesl_public',
-    password: '0987654321',
-    database: 'michaesl_smajobber',
-    dateStrings: true
-});
 
 const public_path = path.join(__dirname, '/../../client/public');
-const JobDao = require('./jobDao.js');
-const MessageDao = require('./messageDao.js');
-let jobDao = new JobDao(pool);
-let messageDao = new MessageDao(pool);
-
 let app = express();
 
 app.use(express.static(public_path));
 app.use(express.json()); // For parsing application/json
 
-//----------- JOB -----------//
+let code = "ls";
+let fs = require('fs');
+let exec = require('child_process').exec;
+let docker_path = "src/octave-image";
 
-app.get('/jobs', (req: express$Request, res: express$Response) => {
-    jobDao.getJobs((status, data) => {
-        res.status(status);
-        res.json(data);
+app.get('/result', (req, res) => {
+    console.log("GET request /result returning: " + code);
+
+    execute('docker build -t octave-image .', function (result) {
+        console.log(result);
+        execute('docker run ' +
+            '--mount src="$(pwd)",' +
+            'target=/test_container,' +
+            'type=bind octave-image matlab.m' +
+            ' -qH --no-window-system', function (result) {
+            console.log(result);
+            res.send(result);
+        });
+    });
+
+});
+
+app.post('/code', (req, res) => {
+    console.log("POST request /code: " + req.body.code);
+    code = req.body.code;
+
+    fs.writeFile('src/octave-image/matlab.m', code, function (err) {
+        if (err) throw err;
     });
 });
 
-app.get('/category/:category', (req: express$Request, res: express$Response) => {
-    jobDao.getCategory(req.params.category, (status, data) => {
-        res.status(status);
-        res.json(data);
-    });
-});
 
-app.get('/search/:keyword', (req: express$Request, res: express$Response) => {
-    jobDao.getSearchResults(req.params.keyword, (status, data) => {
-        res.status(status);
-        res.json(data);
-    });
-});
 
-app.get('/livefeed/:number', (req: express$Request, res: express$Response) => {
-    jobDao.getLiveFeed((status, data) => {
-        res.status(status);
-        res.json(data);
+function execute(command, callback) {
+    exec(command,{cwd: docker_path}, function (error, stdout, stderr) {
+         if(stdout){
+            callback(stdout);
+        }else if(stderr) {
+            callback(stderr)
+        }else if(error){
+            callback(error)
+         }
     });
-});
+};
 
-app.get('/jobs/:id', (req: express$Request, res: express$Response) => {
-    jobDao.getJob(req.params.id, (status, data) => {
-        console.log(data);
-        res.status(status);
-        res.json(data[0]);
-    });
-});
 
-app.put('/jobs', (req: { body: Object }, res: express$Response) => {
-    jobDao.updateJob(req.body, (status, data) => {
-        res.status(status);
-        res.json(data);
-    });
-});
 
-app.post('/jobs', (req: { body: Object }, res: express$Response) => {
-    jobDao.postJob(req.body, (status, data) => {
-        res.status(status);
-        res.json(data);
-    });
-});
 
-app.delete('/jobs/:id', (req: express$Request, res: express$Response) => {
-    jobDao.deleteJob(req.params.id, (status, data) => {
-        res.status(status);
-        res.json(data);
-    });
-});
 
-//----------- MESSAGE -----------//
 
-app.get('/messages/:id', (req: express$Request, res: express$Response) => {
-    messageDao.getMessages(req.params.id, (status, data) => {
-        res.status(status);
-        res.json(data);
-    });
-});
 
-app.post('/jobs/:id/messages', (req: { body: Object }, res: express$Response) => {
-    messageDao.postMessage(req.body, (status, data) => {
-        res.status(status);
-        res.json(data);
-    });
-});
 
 // The listen promise can be used to wait for the web server to start (for instance in your tests)
-export let listen = new Promise<void>((resolve, reject) => {
+export let listen = new Promise((resolve, reject) => {
     // Setup hot reload (refresh web page on client changes)
     reload(app).then(reloader => {
-        app.listen(3000, (error: ?Error) => {
+        app.listen(3000, (error) => {
             if (error) reject(error.message);
             console.log('Express server started');
             // Start hot reload (refresh web page on client changes)
